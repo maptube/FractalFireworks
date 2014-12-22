@@ -1,0 +1,304 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+		<title>Fractal Fireworks</title>
+		<style>
+			#container {
+				background: #000;
+				width: 100%;
+				height: 100%;
+			}
+		</style>
+
+</head>
+
+<body>
+<div id="container"></div>
+
+<script src="three.js"></script>
+<!--
+Yes, you really do have to include these two files from the examples/renderers folder in three.js if you
+want the canvas renderer to work!
+-->
+<script src="CanvasRenderer.js"></script>
+<script src="Projector.js"></script>
+<!--for the particle system-->
+<script src="Sparks.js"></script>
+<script src="libs/tween.min.js"></script>
+
+<script>
+//http://creativejs.com/tutorials/creating-fireworks/
+//https://github.com/paullewis/Fireworks
+//http://threejs.org/examples/webgl_particles_sprites
+
+    var scene;
+    var camera, renderer;
+	var particleCloud;
+	var sprite1, sprite2;
+
+    init();
+    animate();
+
+	//////////////////////////////////////////////////////
+
+    function init() {
+	  scene = new THREE.Scene();
+      // new THREE.PerspectiveCamera( FOV, viewAspectRatio, zNear, zFar );
+      camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+      camera.position.x = 0;
+      camera.position.y = 1.8; //1.8; //3; //50;
+      camera.position.z = 15; //3; //200; //1000;
+	  camera.rotation.x=0.4; //angle up a bit so the emitter box is near the bottom of the screen
+      //scene.add( camera );
+	  
+	  //load sprite maps
+	  sprite1 = THREE.ImageUtils.loadTexture(/*"images/big-glow.png"*/"images/big-glow_mod.png");
+	  spriteW = THREE.ImageUtils.loadTexture("images/small-glow.png");
+	  spriteR = THREE.ImageUtils.loadTexture("images/small_red.png");
+	  spriteM = THREE.ImageUtils.loadTexture("images/small_magenta.png");
+	  spriteY = THREE.ImageUtils.loadTexture("images/small_yellow.png");
+	  spriteB = THREE.ImageUtils.loadTexture("images/small_blue.png");
+	  
+	  var randomColours = [
+		[spriteW],
+		[spriteR],
+		[spriteM],
+		[spriteY],
+		[spriteB],
+		[spriteW,spriteB],
+		[spriteW,spriteR,spriteM,spriteY,spriteB]
+	  ];
+	  
+	  //add a cube to give you something to look at
+	  //RED (left)
+	  var cube = new THREE.Mesh(new THREE.BoxGeometry(1,1,1),
+               new THREE.MeshBasicMaterial({color: 0xff0000}));
+	  //cube.position.x=0;
+	  //cube.position.y=0;
+	  //cube.position.z=5;
+	  scene.add(cube);
+	  
+	  //BLUE (right, close)
+	  //var cube2 = new THREE.Mesh(new THREE.CubeGeometry(1,2,1),
+      //         new THREE.MeshBasicMaterial({color: 0x0000ff}));
+	  //cube2.position.x=5;
+	  //cube2.position.y=0;
+	  //cube2.position.z=-10;
+	  //scene.add(cube2);
+	  
+	  //Particle systems
+	  var group = new THREE.Group();
+	  scene.add(group);
+	  particleCloud = new THREE.Object3D(); //group of particles
+	  particleCloud.y=800;
+	  group.add(particleCloud);
+	  var setTargetParticle = function() {
+		//var sprite1 = THREE.ImageUtils.loadTexture("images/big-glow.png");
+		var mat = new THREE.SpriteMaterial({map: sprite1, color:0xffffff, fog:false});
+		particle = new THREE.Sprite(mat);
+		particle.scale.x=particle.scale.y=Math.random(); //*4+4;
+		particleCloud.add(particle);
+		return particle;
+	  };
+	  var onParticleCreated = function(p) {
+		p.target.position.copy(p.position);
+		p.velocity.x=(Math.random()-0.5)*8; //add some random left/right launch velocity
+		p.userdefined="rocket";
+	  };
+	  var onParticleDead = function(p) {
+		//remove the particle
+		p.target.visible=false;
+		particleCloud.remove(p.target);
+		//spawn new particles here as an explosion if a rocket died
+		if (p.userdefined=="rocket") {
+			//pick a random colour map from randomColours
+			var colMapIdx = Math.round((Math.random()*128))%randomColours.length;
+			var cols = randomColours[colMapIdx];
+			//console.log(cols,colMapIdx,randomColours);
+			//then pick a random explosion type
+			var which = Math.random();
+			if (which<0.3)
+				explodeCircle(p,cols);
+			else if (which<0.6)
+				explodeSphere(p,cols);
+			else
+				explodeKochSnowflake(p,cols);
+		}
+	  };
+	  sparksEmitter = new SPARKS.Emitter(new SPARKS.SteadyCounter(1));
+	  emitterPos = new THREE.Vector3();
+	  //from single point
+	  sparksEmitter.addInitializer(new SPARKS.Position(new SPARKS.PointZone(emitterPos)));
+	  //from a line
+	  //sparksEmitter.addInitializer(new SPARKS.Position(new SPARKS.LineZone(new THREE.Vector3(-2,0,0),new THREE.Vector3(2,0,0))));
+	  sparksEmitter.addInitializer(new SPARKS.Lifetime(2,3));
+	  sparksEmitter.addInitializer(new SPARKS.Target(null,setTargetParticle));
+	  sparksEmitter.addInitializer(new SPARKS.Velocity(new SPARKS.PointZone(new THREE.Vector3(0,6,1))));
+	  sparksEmitter.addAction(new SPARKS.Age());
+	  sparksEmitter.addAction(new SPARKS.Move());
+	  sparksEmitter.addAction(new SPARKS.Accelerate(0,-1,0));
+	  //sparksEmitter.addAction(new SPARKS.RandomDrift(50,50,2000));
+
+	  sparksEmitter.addCallback("created",onParticleCreated);
+	  sparksEmitter.addCallback("dead",onParticleDead);
+	  sparksEmitter.addCallback("updated",function(particle) {
+		particle.target.position.copy(particle.position);
+		if (particle.userdefined=="explosion") {
+			//make explosion particles fade out based on their particle energy (age)
+			//NOTE: you can fiddle the x and y scale for some interesting effects
+			//also, how about changing colour
+			particle.target.scale.x=particle.energy*0.4; //*0.4; //0.4 is a fade time fiddle factor, could make non-linear?
+			particle.target.scale.y=particle.energy*0.4; //*0.4;
+		}
+	  });
+	  sparksEmitter.start();
+	  
+	  //end of particle systems
+
+	  //if (window.WebGLRenderingContext)
+		//renderer = new THREE.WebGLRenderer();
+	  //else
+	  //  renderer = new THREE.CanvasRenderer();
+      renderer = new THREE.CanvasRenderer(); //don't need {alpha:false}?
+	  //renderer = new THREE.WebGLRenderer( {antialias:true} );
+	  //renderer.setClearColor(0x0000ff,1.0); //need alpha for blending
+	  //renderer.autoClear=false; //stops renderer clearing display and allows compositing
+      renderer.setSize( window.innerWidth, window.innerHeight+110 );
+
+      var container = document.getElementById('container');
+      container.appendChild( renderer.domElement );
+      //document.body.appendChild( renderer.domElement );
+
+      renderer.render(scene, camera);
+    }
+	
+	//create a particle at the given position and return it
+	function createParticle(pos,vel,colSprite) {
+		//would use emitter.createParticle(), but don't want the rocket initialisers
+		var newParticle = new SPARKS.Particle();
+		newParticle.userdefined="explosion";
+		newParticle.lifetime=4;
+		newParticle.position.copy(pos);
+		newParticle.velocity.copy(vel);
+		//THREE.NormalBlending, THREE.AdditiveBlending, THREE.SubtractiveBlending
+		var mat = new THREE.SpriteMaterial({map: colSprite/*spriteB*/, color:0x000000, fog:false/*, blending: THREE.SubtractiveBlending*/});
+		var particle = new THREE.Sprite(mat);
+		particle.scale.x=particle.scale.y=1.0; //Math.random(); //*4+4;
+		particleCloud.add(particle);
+		newParticle.target=particle;
+		sparksEmitter._particles.push(newParticle);
+	}
+	//explode new particles around p in a circle, cols is an array of colour sprite images to use
+	function explodeCircle(p,cols) {
+		var colIdx=0;
+		for (var a=0; a<2*Math.PI; a+=2*Math.PI/10) {
+			var colSprite = cols[colIdx]; colIdx=(colIdx+1)%cols.length;
+			createParticle(p.position,new THREE.Vector3(Math.sin(a),Math.cos(a),0),colSprite);
+		}
+	}
+	function explodeSphere(p,cols) {
+		var colIdx=0;
+		for (var a=0; a<2*Math.PI; a+=2*Math.PI/10) {
+			for (var b=0; b<2*Math.PI; b+=2*Math.PI/10) {
+				var colSprite = cols[colIdx]; colIdx=(colIdx+1)%cols.length;
+				createParticle(
+					p.position,
+					new THREE.Vector3(Math.sin(a)*Math.cos(b), Math.sin(a)*Math.sin(b), Math.cos(a)),
+					colSprite);
+			}
+		}
+	}
+	/*
+	function explodeKochSnowflake() {
+		var root3 = Math.sqrt(3);
+		//ABC are the points of the original triangle
+		var A = new THREE.Vector3(-3/2,-root3/2,0);
+		var B = new THREE.Vector3(0,root3/2,0);
+		var C = new THREE.Vector3(3/2,-root3/2,0);
+		//1 and 2 are the equal divisions along the original sides at L/3 and 2L/3
+		var AB1=new THREE.Vector3(A.x+(B.x-A.x)/3,A.y+(B.y-A.y)/3,0);
+		var AB2=new THREE.Vector3(A.x+(B.x-A.x)*2/3,A.y+(B.y-A.y)*2/3,0);
+		var BC1=new THREE.Vector3(B.x+(C.x-B.x)/3,B.y+(C.y-B.y)/3,0);
+		var BC2=new THREE.Vector3(B.x+(C.x-B.x)*2/3,B.y+(C.y-B.y)*2/3,0);
+		var CA1=new THREE.Vector3(C.x+(A.x-C.x)/3,C.y+(A.y-C.y)/3,0);
+		var CA2=new THREE.Vector3(C.x+(A.x-C.x)*2/3,C.y+(A.y-C.y)*2/3,0);
+		//the x points are the 
+	}*/
+	function subdivideLines(segs) {
+		//segs is a list of pairs of coordinates which we have to divide and return
+		var result = [];
+		for (var i=0; i<segs.length-1; i+=2) {
+			var A=segs[i];
+			var B=segs[i+1];
+			//first segment, 1/3 along AB
+			var AB1=new THREE.Vector3(A.x+(B.x-A.x)/3,A.y+(B.y-A.y)/3,0);
+			result.push(A); result.push(AB1);
+			
+			//fourth and final segment, 2/3 along AB - need to calc here for middle
+			var AB2 = new THREE.Vector3(A.x+(B.x-A.x)*2/3,A.y+(B.y-A.y)*2/3,0);
+			
+			//middle segment here, 1/3 along AB to 2/3 along AB, as two sides of triangle
+			var ABx=new THREE.Vector3((A.x+B.x)/2,(A.y+B.y)/2,0); //midpoint of AB
+			var root3=Math.sqrt(3);
+			ABx.x+=(A.y-B.y)*root3/6; ABx.y+=(B.x-A.x)*root3/6; //root3/6 along normal to AB (=-y,x)
+			result.push(AB1,ABx); result.push(ABx,AB2);
+
+			//push final two segments here (AB2 to B)
+			result.push(AB2); result.push(B);
+		}
+		return result;
+	}
+	function explodeKochSnowflake(p,cols) {
+		var root3 = Math.sqrt(3);
+		//ABC are the points of the original triangle
+		var A = new THREE.Vector3(-0.5,-root3/4,0);
+		var B = new THREE.Vector3(0,root3/4,0);
+		var C = new THREE.Vector3(0.5,-root3/4,0);
+		var segs = [ A, B,    B, C,    C, A ];
+		segs = subdivideLines(segs);
+		if (Math.random()>0.5)
+			segs = subdivideLines(segs);
+		//console.log("segs2",segs2);
+		//and push all the points as particles
+		//this is slightly different as we place the points around the centre and velocity is calculated
+		//from the centre to the point - that way we keep the shape
+		var colIdx=0;
+		for (var i=0; i<segs.length; i+=2) { //only do first coord of each segment pair, otherwise you double up
+			//console.log("segs2i",segs2[i]);
+			var colSprite = cols[colIdx]; colIdx=(colIdx+1)%cols.length;
+			var vel = new THREE.Vector3(segs[i].x,segs[i].y,segs[i].z); //.normalize();
+			segs[i].x+=p.position.x; segs[i].y+=p.position.y; segs[i].z+=p.position.z;
+			createParticle(segs[i],vel,colSprite);
+		}
+	}
+
+
+    function animate() {
+        requestAnimationFrame( animate );   
+		
+        render();
+		//update
+    }
+
+    function render() {
+		//we have renderer.autoClear=false to allow compositing
+		//draw a transparent blue rectangle over current scene to fade it out before drawing over the top
+		//get context from dom element and fill in black over the top of the last frame
+		//var ctx = renderer.domElement.getContext("2d");
+		//ctx.globalCompositeOperation = 'source-over'; //lighter, darker, source-over
+		//ctx.fillStyle="rgba(0,0,0,0.2)"; //black with alpha
+		//ctx.fillRect(0,0,window.innerWidth, window.innerHeight);
+        //renderer.setClearColor(0x000000,0.1);
+		//renderer.clear();
+		renderer.render( scene, camera );
+    }
+	
+	//////////////////////////////////////////////////////////////
+	
+	
+	
+</script>
+
+</body>
+</html>
